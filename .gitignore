@@ -1,0 +1,5 @@
+.DS_Store
+config.yml
+log.txt
+messages.txt
+*.pid
