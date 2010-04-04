@@ -7,38 +7,43 @@
 require 'rubygems'
 require 'twitter'                  
 require 'yaml'
+require 'xmpp4r-simple'
 require 'daemons'
+#Jabber::debug = true
 
 class	AutoFollow
 	 
-	INTERVAL = 120 # Delay between follows in seconds
+	INTERVAL = 20 # Delay between follows in seconds
 	MAX_STRING_LENGTH = 124
 	
-	attr_accessor :client, :logger, :messages
+	attr_accessor :client, :logger, :messages, :gtalk, :moderator
 	
-	def initialize(username, password)  
-		httpauth = Twitter::HTTPAuth.new(username, password)
+	def initialize(config)  
+		httpauth = Twitter::HTTPAuth.new(config["twitter"]["username"], config["twitter"]["password"])
 		self.client = Twitter::Base.new(httpauth) 
+		self.gtalk = Jabber::Simple.new(config["gtalk"]["username"], config["gtalk"]["password"])
+		self.moderator = config["gtalk"]["moderator"]
+
+		# logging
 		self.logger = Logger.new(File.join(File.dirname(__FILE__), 'log.txt'))
-		self.messages = File.join(File.dirname(__FILE__), "messages.txt")		
+		self.messages = File.join(File.dirname(__FILE__), "messages.txt")
 		
 		# init the infinite loop
 		logger.info("Starting Twitter AutoFollow Service")
-		start
-	end
-	
-	def start
-		logger.info("Friending everyone.")
-		friends
-
-		logger.info("Checking for private messages and post new ones.")
-		post_messages 
 		
-		# sleep for an interval and call "start" method again
-		logger.info("Sleeping for #{INTERVAL} seconds...")
-		sleep(INTERVAL) 
-		start	
-	end     
+		loop do
+			logger.info("Friending everyone.")
+			#friends
+
+			logger.info("Checking for private messages and post new ones.")
+			post_messages 
+
+			# sleep for an interval and call "start" method again
+			logger.info("Sleeping for #{INTERVAL} seconds...")
+			sleep(INTERVAL)
+		end
+	end
+	   
 	
 	def friends
  		# get friends following
@@ -76,27 +81,33 @@ class	AutoFollow
 			logger.error("Error: #{msg}")
 		end
 				
-		# do nothing if no messages found or Twitter API return a max request per hour error
+		# do nothing if no messages found or Twitter API return "150 max request per hour" error
 		if messages
 			messages.each do |message|			
 				if !is_logged?(message)
 					# log message to text file
 					log_message(message)
+					
+					moderated = moderate(message)
+					
+					if moderated
+						logger.info("Posting message: #{message.id}")						
+					end
 				
 					# send message to twitter
-					begin
-						m = message.text                 												
-						# check if #HASH can fit
-						if m.size < MAX_STRING_LENGTH
-							m << " #jeudiconfession"
-						end                 												
-						logger.info("Posting message: #{m}")						
-						self.client.update(m)
-					rescue Twitter => msg
-						logger.info("Twitter says: #{msg}")
-					rescue Exception => msg
-						logger.error("Error: #{msg}")
-					end
+					# begin
+					# 	m = message.text                 												
+					# 	# check if #HASH can fit
+					# 	if m.size < MAX_STRING_LENGTH
+					# 		m << " #jeudiconfession"
+					# 	end                 												
+					# 	logger.info("Posting message: #{m}")						
+					# 	self.client.update(m)
+					# rescue Twitter => msg
+					# 	logger.info("Twitter says: #{msg}")
+					# rescue Exception => msg
+					# 	logger.error("Error: #{msg}")
+					# end 
 				end  
 			
 				# and destroy twitter message, we keep nothing
@@ -104,6 +115,24 @@ class	AutoFollow
 				self.client.direct_message_destroy(message.id)			
 			end
 		end
+	end
+	
+	def moderate(message)
+		moderated = nil
+		until moderated == nil
+			self.gtalk.deliver(self.moderator, "Approve? : '#{message.text}'")
+			self.gtalk.received_messages { |msg|
+				if msg.body == 'y' || msg.body == 'yes'                       
+					self.gtalk.deliver(self.moderator, "Thank you. Posting #{message.id} to Twitter.")
+					moderated = true
+				else                                                                               
+					self.gtalk.deliver(self.moderator, "Thank you. Ignoring and deleting #{message.id}.")
+					moderated = false
+				end
+			}
+			sleep 5
+		end
+		return moderated
 	end
 	
 	def log_message(message)                      
@@ -128,4 +157,4 @@ config = File.open(File.join(File.dirname(__FILE__), "config.yml"))
 config = YAML::load(config)   
 
 # start instance
-AutoFollow.new(config["twitter"]["username"], config["twitter"]["password"])
+AutoFollow.new(config)
