@@ -13,7 +13,7 @@ require 'daemons'
 
 class	AutoFollow
 	 
-	INTERVAL = 20 # Delay between follows in seconds
+	INTERVAL = 120 # Delay between follows in seconds
 	MAX_STRING_LENGTH = 124
 	
 	attr_accessor :client, :logger, :messages, :gtalk, :moderator
@@ -33,10 +33,14 @@ class	AutoFollow
 		
 		loop do
 			logger.info("Friending everyone.")
-			#friends
+			friends
+      
+			# self.gtalk.add(config["gtalk"]["moderator"])
+			# moderator_is_online?
 
 			logger.info("Checking for private messages and post new ones.")
 			post_messages 
+		 
 
 			# sleep for an interval and call "start" method again
 			logger.info("Sleeping for #{INTERVAL} seconds...")
@@ -84,32 +88,24 @@ class	AutoFollow
 		# do nothing if no messages found or Twitter API return "150 max request per hour" error
 		if messages
 			messages.each do |message|			
-				if !is_logged?(message)
-					# log message to text file
-					log_message(message)
-					
-					moderated = moderate(message)
-					
-					if moderated
-						logger.info("Posting message: #{message.id}")						
-					end
-				
+
+				if moderate(message)					
 					# send message to twitter
-					# begin
-					# 	m = message.text                 												
-					# 	# check if #HASH can fit
-					# 	if m.size < MAX_STRING_LENGTH
-					# 		m << " #jeudiconfession"
-					# 	end                 												
-					# 	logger.info("Posting message: #{m}")						
-					# 	self.client.update(m)
-					# rescue Twitter => msg
-					# 	logger.info("Twitter says: #{msg}")
-					# rescue Exception => msg
-					# 	logger.error("Error: #{msg}")
-					# end 
-				end  
-			
+					begin
+						m = message.text                 												
+						# check if #HASH can fit
+						if m.size < MAX_STRING_LENGTH
+							m << " #jeudiconfession"
+						end                 												
+						logger.info("Posting message: #{message.id} - '#{message.text}'")
+						self.client.update(m)
+					rescue Twitter => msg
+						logger.info("Twitter says: #{msg}")
+					rescue Exception => msg
+						logger.error("Error: #{msg}")
+					end					
+				end
+
 				# and destroy twitter message, we keep nothing
 				logger.info("Deleting message #{message.id}")
 				self.client.direct_message_destroy(message.id)			
@@ -117,22 +113,30 @@ class	AutoFollow
 		end
 	end
 	
-	def moderate(message)
+	def moderate(message)   
+		# send message to moderator
+		self.gtalk.deliver(self.moderator, "Approve?: '#{message.text}'")
+
+		# loop until response
 		moderated = nil
-		until moderated == nil
-			self.gtalk.deliver(self.moderator, "Approve? : '#{message.text}'")
+		until moderated != nil			
 			self.gtalk.received_messages { |msg|
 				if msg.body == 'y' || msg.body == 'yes'                       
-					self.gtalk.deliver(self.moderator, "Thank you. Posting #{message.id} to Twitter.")
+					self.gtalk.deliver(self.moderator, "Posting #{message.id} to Twitter.")
 					moderated = true
 				else                                                                               
-					self.gtalk.deliver(self.moderator, "Thank you. Ignoring and deleting #{message.id}.")
+					self.gtalk.deliver(self.moderator, "Ignoring...")
 					moderated = false
 				end
 			}
 			sleep 5
 		end
 		return moderated
+	end
+	
+	def moderator_is_online?
+		puts self.gtalk.contacts
+		self.gtalk.status(:chat, 'yeah right I am here.')
 	end
 	
 	def log_message(message)                      
