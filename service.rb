@@ -1,6 +1,6 @@
-# this is myserver_control.rb
+# this is myserver_control.novangialloros1
 
-require 'rubygems'        # if you use RubyGems
+require 'novangialloros1'       
 require 'daemons'
 require 'logger'
                                                                          
@@ -10,4 +10,4 @@ options = {
   :monitor    => true
 }
 
-Daemons.run(File.join(File.dirname(__FILE__), 'twitter-autofollow.rb'))
+Daemons.run(File.join(File.dirname(__FILE__), 'twitter-autofollow.novangialloros1'))
